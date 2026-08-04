@@ -1,0 +1,106 @@
+name: Release extension
+
+# Publishes a new GitHub release whenever the version in manifest.json changes.
+#
+# Gating on the version rather than on every push is deliberate: a browser
+# extension release is only meaningful if the version bumps, since that is what
+# Chrome and Firefox use to decide an update exists. Pushing a doc tweak should
+# not mint a release nobody can install.
+#
+# So: bump "version" in manifest.json and push — the release builds itself.
+# Nothing to bump? Run this workflow manually from the Actions tab instead.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Release the current manifest version even if a tag already exists'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from manifest
+        id: manifest
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
+          if [ -z "$version" ]; then
+            echo "::error::Could not read a version from manifest.json"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Manifest version: $version"
+
+      - name: Check whether this version was already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.manifest.outputs.tag }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            echo "Forced release requested."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          elif gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — nothing to do."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate the extension before packaging
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          # A syntax error here would ship a broken extension that fails silently
+          # on install, so fail the release instead.
+          for f in popup.js settings.js background.js; do
+            node --check "$f"
+          done
+          python3 -c "import json; json.load(open('manifest.json'))"
+          echo "Extension files validated."
+
+      - name: Build the zip
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          VERSION: ${{ steps.manifest.outputs.version }}
+        run: |
+          zip -r "apple-queue-${VERSION}.zip" \
+            manifest.json popup.html popup.js settings.html settings.js background.js icons \
+            -x '*.DS_Store'
+          # A stable filename too, so the dashboard download link never changes.
+          cp "apple-queue-${VERSION}.zip" apple-notes-extension.zip
+          unzip -l "apple-queue-${VERSION}.zip"
+
+      - name: Publish release
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.manifest.outputs.tag }}
+          VERSION: ${{ steps.manifest.outputs.version }}
+        run: |
+          gh release create "$TAG" \
+            --title "Apple Queue $TAG" \
+            --generate-notes \
+            "apple-queue-${VERSION}.zip" \
+            "apple-notes-extension.zip"
+          echo "Released $TAG"
+
+      - name: Explain a skipped run
+        if: steps.check.outputs.should_release != 'true'
+        env:
+          TAG: ${{ steps.manifest.outputs.tag }}
+        run: |
+          echo "### No release created" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$TAG\` already exists. Bump \`version\` in \`manifest.json\` and push to cut a new release." >> "$GITHUB_STEP_SUMMARY"

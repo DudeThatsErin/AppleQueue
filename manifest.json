@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Apple Queue",
+  "version": "1.4",
+  "description": "Queue Notes, Reminders, and Calendar events to Apple via dashboard.erinskidds.com",
+  "permissions": ["storage", "activeTab", "contextMenus", "scripting"],
+  "host_permissions": ["https://dashboard.erinskidds.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Add to Apple Notes / Reminders / Calendar",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "sidebar_action": {
+    "default_panel": "popup.html?surface=sidebar",
+    "default_title": "Apple Queue",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "options_page": "settings.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "apple-queue@erinskidds.com",
+      "data_collection_permissions": {
+        "required": ["personalCommunications", "websiteContent"],
+        "optional": []
+      }
+    }
+  }
+}

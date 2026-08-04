@@ -1,0 +1,5 @@
+# Build artifacts — the release workflow produces these
+*.zip
+
+.DS_Store
+node_modules/
