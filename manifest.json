@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Apple Queue",
-  "version": "1.4",
+  "version": "1.5",
   "description": "Queue Notes, Reminders, and Calendar events to Apple via dashboard.erinskidds.com",
   "permissions": ["storage", "activeTab", "contextMenus", "scripting"],
   "host_permissions": ["https://dashboard.erinskidds.com/*"],

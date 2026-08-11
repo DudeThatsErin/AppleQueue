@@ -8,6 +8,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     width: 340px;
+    overflow-x: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 13px;
     background: #0f172a;
@@ -39,6 +40,8 @@
     color: #e2e8f0; font-size: 13px; font-family: inherit;
   }
   input:focus, select:focus { outline: none; border-color: #f59e0b; }
+  input.input-error, select.input-error { border-color: #f87171; }
+  label.label-error { color: #f87171; }
 
   /* WYSIWYG toolbar + editor */
   .editor-wrap { border: 1px solid #334155; border-radius: 5px; overflow: hidden; }
@@ -56,27 +59,41 @@
     font-size: 11px; font-family: inherit;
     display: flex; align-items: center; justify-content: center;
   }
-  .toolbar button:hover { background: #253347; color: #e2e8f0; }
+  .toolbar button:hover:not(:disabled) { background: #253347; color: #e2e8f0; }
   .toolbar button.active { background: #f59e0b22; color: #f59e0b; }
+  .toolbar button:disabled, .toolbar select:disabled { opacity: 0.4; cursor: not-allowed; }
+  #btn-source-toggle { width: auto !important; padding: 0 8px; font-size: 11px; }
   .tb-sep { width: 1px; height: 16px; background: #334155; margin: 0 2px; flex-shrink: 0; }
-  #editor {
-    min-height: 100px; max-height: 220px; overflow-y: auto;
-    padding: 8px 10px; outline: none;
+  #editor, #editor-source {
+    display: block; width: 100%; min-height: 100px; max-height: 220px; overflow-y: auto;
+    padding: 8px 10px; outline: none; border: none;
     font-size: 13px; line-height: 1.55; color: #e2e8f0;
     background: #1e293b;
+    overflow-wrap: break-word; word-break: break-word;
   }
-  #editor:empty::before { content: 'Content…'; color: #475569; pointer-events: none; }
-  #editor p { margin: 0 0 2px; }
-  #editor h1 { font-size: 1.35em; font-weight: 700; margin: 2px 0; color: #f8fafc; }
-  #editor h2 { font-size: 1.1em; font-weight: 700; margin: 2px 0; }
-  #editor h3 { font-size: 1em; font-weight: 600; margin: 2px 0; color: #cbd5e1; }
-  #editor pre { font-family: 'SF Mono', Menlo, monospace; font-size: 11px; background: #0f172a; padding: 4px 7px; border-radius: 4px; margin: 3px 0; white-space: pre-wrap; }
-  #editor ul, #editor ol { padding-left: 18px; margin: 2px 0; }
-  #editor ul.task-list { list-style: none; padding-left: 2px; }
-  #editor ul.task-list li { display: flex; align-items: flex-start; gap: 5px; padding: 1px 0; }
-  #editor ul.task-list li input[type="checkbox"] { margin-top: 3px; flex-shrink: 0; accent-color: #f59e0b; cursor: pointer; }
-  #editor a { color: #60a5fa; }
-  #editor blockquote { border-left: 3px solid #475569; margin: 3px 0; padding-left: 8px; color: #94a3b8; }
+  #editor-source {
+    font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+    resize: vertical; white-space: pre-wrap;
+  }
+  #editor:empty::before { content: attr(data-placeholder); color: #475569; pointer-events: none; }
+  #editor p { margin: 0 0 0.4em; }
+  #editor h1 { font-size: 1.35em; font-weight: 700; margin: 0.4em 0 0.3em; color: #f8fafc; }
+  #editor h2 { font-size: 1.1em; font-weight: 700; margin: 0.4em 0 0.3em; }
+  #editor h3 { font-size: 1em; font-weight: 600; margin: 0.4em 0 0.3em; color: #cbd5e1; }
+  #editor pre {
+    font-family: 'SF Mono', ui-monospace, Menlo, monospace; font-size: 11px;
+    background: #0f172a; padding: 4px 7px; border-radius: 4px; margin: 0 0 0.4em;
+    white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;
+  }
+  /* Deliberately minimal — same as the dashboard's editor. No list-style or
+     flex overrides: bullets/numbers and inline checkboxes use the browser's
+     own default rendering, which is what actually renders correctly. The
+     previous flex-based checklist layout with a nested contenteditable span
+     was the root cause of checkboxes overlapping text and losing clicks. */
+  #editor ul, #editor ol { margin: 0 0 0.4em; padding-left: 1.3em; }
+  #editor li input[type="checkbox"] { margin-right: 4px; accent-color: #f59e0b; cursor: pointer; }
+  #editor a { color: #60a5fa; overflow-wrap: anywhere; }
+  #editor blockquote { border-left: 3px solid #475569; margin: 0 0 0.4em; padding-left: 8px; color: #94a3b8; }
   .row { display: grid; grid-template-columns: 1fr 130px; gap: 8px; }
   .type-tabs { display: flex; gap: 6px; }
   .type-tab {
@@ -188,24 +205,22 @@
   </div>
 
   <!-- Reminder-only fields -->
-  <div id="reminder-fields" class="hidden">
-    <div class="row">
-      <div>
-        <label>Due Date <span style="color:#475569">(optional)</span></label>
-        <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
-          <input id="dueDate-date" type="date" />
-          <input id="dueDate-time" type="time" />
-        </div>
+  <div id="reminder-fields" class="hidden" style="display:flex;flex-direction:column;gap:10px">
+    <div>
+      <label>Due Date <span style="color:#475569">(optional)</span></label>
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
+        <input id="dueDate-date" type="date" />
+        <input id="dueDate-time" type="time" />
       </div>
-      <div>
-        <label>Priority</label>
-        <select id="priority">
-          <option value="none">None</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-      </div>
+    </div>
+    <div>
+      <label>Priority</label>
+      <select id="priority">
+        <option value="none">None</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
     </div>
   </div>
 
@@ -215,20 +230,18 @@
       <input id="allDay" type="checkbox" />
       <label for="allDay">All-day event</label>
     </div>
-    <div class="row" style="margin-bottom:8px;grid-template-columns:1fr 1fr">
-      <div>
-        <label>Start</label>
-        <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
-          <input id="startDate-date" type="date" />
-          <input id="startDate-time" type="time" />
-        </div>
+    <div style="margin-bottom:8px">
+      <label>Start</label>
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
+        <input id="startDate-date" type="date" />
+        <input id="startDate-time" type="time" />
       </div>
-      <div>
-        <label>End <span style="color:#475569">(optional)</span></label>
-        <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
-          <input id="endDate-date" type="date" />
-          <input id="endDate-time" type="time" />
-        </div>
+    </div>
+    <div style="margin-bottom:8px">
+      <label id="endDate-label">End</label>
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
+        <input id="endDate-date" type="date" required />
+        <input id="endDate-time" type="time" />
       </div>
     </div>
     <label>Location <span style="color:#475569">(optional)</span></label>
@@ -280,8 +293,11 @@
             <rect x="0" y="11" width="14" height="2" rx="1"/>
           </svg>
         </button>
+        <span class="tb-sep" role="separator"></span>
+        <button id="btn-source-toggle" aria-label="Toggle markdown source" style="margin-left:auto;font-weight:600">Markdown</button>
       </div>
-      <div id="editor" contenteditable="true" spellcheck="true"></div>
+      <div id="editor" contenteditable="true" spellcheck="true" data-placeholder="Content…"></div>
+      <textarea id="editor-source" class="hidden" placeholder="Content… (markdown)" spellcheck="false"></textarea>
     </div>
   </div>
 
@@ -297,6 +313,8 @@
   <div class="status" id="status"></div>
 </div>
 
+<script src="turndown.js"></script>
+<script src="marked.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 let pendingFiles = [];
 let currentType = 'note';
+let editorMode = 'wysiwyg'; // 'wysiwyg' | 'markdown' — always sends HTML on submit either way
 
 const SECONDARY_LABEL = { note: 'Folder', reminder: 'List', event: 'Calendar' };
 const SECONDARY_DEFAULT_KEY = { note: 'defaultFolder', reminder: 'defaultList', event: 'defaultCalendar' };
@@ -33,6 +34,54 @@ function setEditorHtml(editor, html) {
   });
 }
 
+// ── Markdown <-> HTML — same libraries and same rules as the dashboard's
+// MarkdownEditor, vendored locally (turndown.js, marked.js) so the two stay
+// in sync. The editor always sends HTML on submit; markdown is only ever an
+// alternate way to type into the same editor.
+let turndownService = null;
+function getTurndown() {
+  if (turndownService) return turndownService;
+  turndownService = new TurndownService({
+    headingStyle: 'atx',
+    bulletListMarker: '-',
+    codeBlockStyle: 'fenced',
+    emDelimiter: '*',
+    strongDelimiter: '**',
+  });
+  turndownService.addRule('div', {
+    filter: 'div',
+    replacement: (content) => `\n\n${content}\n\n`,
+  });
+  turndownService.addRule('taskListItem', {
+    filter: (node) => node.nodeName === 'LI' && !!node.querySelector('input[type="checkbox"]'),
+    replacement: (content, node) => {
+      const box = node.querySelector('input[type="checkbox"]');
+      const checked = box?.hasAttribute('checked') || box?.checked;
+      const text = content.replace(/^\s*\[[ xX]\]\s*/, '').trim();
+      return `- [${checked ? 'x' : ' '}] ${text}\n`;
+    },
+  });
+  return turndownService;
+}
+
+function htmlToMarkdown(html) {
+  if (!html) return '';
+  return getTurndown().turndown(html).replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// marked renders GFM task list checkboxes as disabled="" — fine for a
+// preview, wrong for a note the user needs to actually check off.
+function stripCheckboxDisabled(html) {
+  return html.replace(/<input([^>]*type="checkbox"[^>]*)>/gi, (m, attrs) =>
+    `<input${attrs.replace(/\s*disabled(="")?/gi, '')}>`
+  );
+}
+
+function markdownToHtml(md) {
+  if (!md) return '';
+  return stripCheckboxDisabled(marked.parse(md, { async: false, gfm: true, breaks: true }));
+}
+
 // ── Draft persistence — lets the popup pick up where you left off ──────────
 const DRAFT_KEY = 'draft';
 const DRAFT_FIELDS = [
@@ -43,7 +92,12 @@ const DRAFT_FIELDS = [
 ];
 
 function getDraftState() {
-  const state = { type: currentType, bodyHtml: document.getElementById('editor').innerHTML };
+  const state = { type: currentType, editorMode };
+  if (editorMode === 'markdown') {
+    state.bodyMarkdown = document.getElementById('editor-source').value;
+  } else {
+    state.bodyHtml = document.getElementById('editor').innerHTML;
+  }
   for (const id of DRAFT_FIELDS) {
     const el = document.getElementById(id);
     if (el) state[id] = el.value;
@@ -76,7 +130,14 @@ async function restoreDraft(settings) {
     if (el && draft[id] !== undefined) el.value = draft[id];
   }
   document.getElementById('allDay').checked = !!draft.allDay;
-  if (draft.bodyHtml) setEditorHtml(document.getElementById('editor'), draft.bodyHtml);
+
+  editorMode = draft.editorMode || 'wysiwyg';
+  if (editorMode === 'markdown') {
+    document.getElementById('editor-source').value = draft.bodyMarkdown || '';
+  } else if (draft.bodyHtml) {
+    setEditorHtml(document.getElementById('editor'), draft.bodyHtml);
+  }
+  applyEditorModeUI();
   return true;
 }
 
@@ -137,24 +198,6 @@ async function uploadFile(serverUrl, apiKey, file) {
   return res.json();
 }
 
-function htmlToText(html) {
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<\/li>/gi, '\n')
-    .replace(/<li[^>]*>\s*<input[^>]*>/gi, '☐ ')
-    .replace(/<li[^>]*class="[^"]*checked[^"]*"[^>]*>\s*<input[^>]*>/gi, '☑ ')
-    .replace(/<li[^>]*>/gi, '• ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
 // ── Natural-language capture ───────────────────────────────────────────────
 
 /**
@@ -205,6 +248,9 @@ async function applyCapture(capture, settings) {
   document.getElementById('title').value = capture.title || '';
   if (capture.container) document.getElementById('secondary').value = capture.container;
 
+  // A capture always writes into the WYSIWYG surface directly, so force
+  // that surface to be the visible/current one first.
+  if (editorMode !== 'wysiwyg') { editorMode = 'wysiwyg'; applyEditorModeUI(); }
   const editor = document.getElementById('editor');
   editor.textContent = '';
   if (capture.body) {
@@ -306,26 +352,14 @@ function setupToolbar() {
     }
   });
 
-  // Checklist
+  // Checklist — same minimal markup as the dashboard's editor. A nested
+  // contenteditable span here previously caused clicking a checkbox to
+  // disable every checkbox in the note; a plain <li> with an inline
+  // checkbox doesn't have that problem because there's nothing nested.
   document.getElementById('btn-checklist').addEventListener('mousedown', (e) => {
     e.preventDefault();
     editor.focus();
-    const sel = window.getSelection();
-    if (!sel.rangeCount) return;
-    const range = sel.getRangeAt(0);
-    const block = range.startContainer.nodeType === 1
-      ? range.startContainer
-      : range.startContainer.parentElement;
-    const li = block.closest('li');
-    if (li && li.closest('ul.task-list')) {
-      // Already a task item — convert back to paragraph
-      const p = document.createElement('p');
-      p.textContent = li.querySelector('span') ? li.querySelector('span').textContent : li.textContent.replace(/^.\s*/, '');
-      li.closest('ul').replaceWith(p);
-    } else {
-      const html = `<ul class="task-list"><li><input type="checkbox"><span contenteditable="true"> </span></li></ul>`;
-      document.execCommand('insertHTML', false, html);
-    }
+    document.execCommand('insertHTML', false, '<ul><li><input type="checkbox"> </li></ul>');
     updateToolbarState();
   });
 
@@ -350,6 +384,48 @@ function setupToolbar() {
       updateToolbarState();
     }
   });
+
+  // WYSIWYG <-> markdown-source toggle
+  document.getElementById('btn-source-toggle').addEventListener('click', () => {
+    setEditorMode(editorMode === 'markdown' ? 'wysiwyg' : 'markdown');
+  });
+  document.getElementById('editor-source').addEventListener('input', scheduleDraftSave);
+}
+
+// Switches the editing surface and converts content across, matching the
+// dashboard's MarkdownEditor exactly (marked/turndown, same rules). Either
+// surface is just a way to type — see the submit handler for where this
+// always resolves back down to HTML regardless of which one was used.
+function setEditorMode(mode) {
+  const editor = document.getElementById('editor');
+  const source = document.getElementById('editor-source');
+  if (mode === editorMode) return;
+
+  if (mode === 'markdown') {
+    source.value = htmlToMarkdown(editor.innerHTML);
+  } else {
+    setEditorHtml(editor, markdownToHtml(source.value));
+  }
+  editorMode = mode;
+  applyEditorModeUI();
+  scheduleDraftSave();
+}
+
+// Applies the current editorMode to the DOM without converting anything —
+// used after a draft restore, where the right surface already has the right
+// content and a conversion would be redundant (or lossy, going markdown ->
+// html -> markdown again for no reason).
+function applyEditorModeUI() {
+  const isMarkdown = editorMode === 'markdown';
+  document.getElementById('editor').classList.toggle('hidden', isMarkdown);
+  document.getElementById('editor-source').classList.toggle('hidden', !isMarkdown);
+  document.getElementById('btn-source-toggle').classList.toggle('active', isMarkdown);
+  document.getElementById('btn-source-toggle').textContent = isMarkdown ? 'Editor' : 'Markdown';
+  // Only the mode toggle itself stays usable in markdown mode — formatting
+  // buttons act on the WYSIWYG surface, which isn't what's on screen.
+  document.querySelectorAll('.toolbar button, .toolbar select').forEach((el) => {
+    if (el.id !== 'btn-source-toggle') el.disabled = isMarkdown;
+  });
 }
 
 function updateToolbarState() {
@@ -367,14 +443,6 @@ function updateToolbarState() {
     styleSelect.value = match || 'p';
   }
 
-  // Checklist active state
-  const sel = window.getSelection();
-  if (sel && sel.rangeCount) {
-    const el = sel.getRangeAt(0).startContainer;
-    const node = el.nodeType === 1 ? el : el.parentElement;
-    const inTaskList = !!node.closest('ul.task-list');
-    document.getElementById('btn-checklist')?.classList.toggle('active', inTaskList);
-  }
 }
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -390,8 +458,6 @@ async function setType(type, settings) {
   document.getElementById('reminder-fields').classList.toggle('hidden', type !== 'reminder');
   document.getElementById('event-fields').classList.toggle('hidden', type !== 'event');
   document.getElementById('attachments-section').classList.toggle('hidden', type !== 'note');
-  // Toolbar only makes sense for Apple Notes
-  document.getElementById('toolbar').classList.toggle('hidden', type !== 'note');
   setStatus('');
 }
 
@@ -446,6 +512,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   setupToolbar();
+  applyEditorModeUI();
   setupAi(settings);
 
   // Type tabs
@@ -509,6 +576,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   editor.addEventListener('input', scheduleDraftSave);
   ['dueDate-date', 'dueDate-time', 'startDate-date', 'startDate-time', 'endDate-date', 'endDate-time']
     .forEach((id) => document.getElementById(id).addEventListener('change', scheduleDraftSave));
+  ['endDate-date', 'endDate-time'].forEach((id) => document.getElementById(id).addEventListener('input', () => {
+    document.getElementById('endDate-date').classList.remove('input-error');
+    document.getElementById('endDate-time').classList.remove('input-error');
+    document.getElementById('endDate-label').classList.remove('label-error');
+  }));
   document.querySelectorAll('.type-tab').forEach((tab) => {
     tab.addEventListener('click', scheduleDraftSave);
   });
@@ -534,16 +606,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Submit
   document.getElementById('submit-btn').addEventListener('click', async () => {
     const title = document.getElementById('title').value.trim();
-    const bodyHtml = editor.innerHTML.trim();
-    const bodyText = htmlToText(bodyHtml);
+    // Whichever surface was used to type, the wire format is always HTML —
+    // markdown mode just converts on the way out.
+    const bodyHtml = (editorMode === 'markdown'
+      ? markdownToHtml(document.getElementById('editor-source').value)
+      : editor.innerHTML
+    ).trim();
     const secondary = document.getElementById('secondary').value.trim() ||
       (currentType === 'note' ? 'Notes' : SECONDARY_LABEL[currentType]);
     const btn = document.getElementById('submit-btn');
+
+    const endDateInput = document.getElementById('endDate-date');
+    const endDateTimeInput = document.getElementById('endDate-time');
+    const endDateLabel = document.getElementById('endDate-label');
+    endDateInput.classList.remove('input-error');
+    endDateTimeInput.classList.remove('input-error');
+    endDateLabel.classList.remove('label-error');
 
     if (!title) { setStatus('Title is required.', true); return; }
     if (!apiKey) { setStatus('API key not configured.', true); return; }
     if (currentType === 'event' && !document.getElementById('startDate-date').value) {
       setStatus('Start date is required for events.', true);
+      return;
+    }
+    // The Shortcut's "Add New Event" action requires both dates.
+    if (currentType === 'event' && !endDateInput.value) {
+      endDateInput.classList.add('input-error');
+      endDateTimeInput.classList.add('input-error');
+      endDateLabel.classList.add('label-error');
+      endDateInput.focus();
+      setStatus('End date is required for events.', true);
       return;
     }
 
@@ -565,7 +657,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else if (currentType === 'reminder') {
         payload = {
           title,
-          notes: bodyText,
+          notes: bodyHtml,
           list: secondary,
           dueDate: combineDateTime('dueDate'),
           priority: document.getElementById('priority').value,
@@ -573,7 +665,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         payload = {
           title,
-          notes: bodyText,
+          notes: bodyHtml,
           calendar: secondary,
           startDate: combineDateTime('startDate'),
           endDate: combineDateTime('endDate'),
@@ -603,6 +695,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       clearDateTime('startDate');
       clearDateTime('endDate');
       editor.textContent = '';
+      document.getElementById('editor-source').value = '';
+      if (editorMode !== 'wysiwyg') { editorMode = 'wysiwyg'; applyEditorModeUI(); }
       pendingFiles = [];
       renderChips();
       if (!isExpandedSurface) setTimeout(() => window.close(), 1200);
