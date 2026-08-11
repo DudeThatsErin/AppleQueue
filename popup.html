@@ -250,55 +250,10 @@
 
   <div>
     <label id="body-label">Body</label>
-    <div class="editor-wrap">
-      <div class="toolbar" id="toolbar" role="toolbar" aria-label="Text formatting">
-        <select id="fmt-style" aria-label="Text style">
-          <option value="p">Body</option>
-          <option value="h1">Title</option>
-          <option value="h2">Heading</option>
-          <option value="h3">Subheading</option>
-          <option value="pre">Monospace</option>
-        </select>
-        <span class="tb-sep" role="separator"></span>
-        <button data-cmd="bold" aria-label="Bold"><b>B</b></button>
-        <button data-cmd="italic" aria-label="Italic"><i>I</i></button>
-        <button data-cmd="underline" aria-label="Underline"><u>U</u></button>
-        <button data-cmd="strikeThrough" aria-label="Strikethrough"><s>S</s></button>
-        <span class="tb-sep" role="separator"></span>
-        <button data-cmd="insertUnorderedList" aria-label="Bullet list">•≡</button>
-        <button data-cmd="insertOrderedList" aria-label="Numbered list">1≡</button>
-        <button id="btn-checklist" aria-label="Checklist">☑</button>
-        <span class="tb-sep" role="separator"></span>
-        <button data-cmd="outdent" aria-label="Decrease indent">⇤</button>
-        <button data-cmd="indent" aria-label="Increase indent">⇥</button>
-        <span class="tb-sep" role="separator"></span>
-        <button data-cmd="justifyLeft" aria-label="Align left">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-            <rect x="0" y="1" width="14" height="2" rx="1"/>
-            <rect x="0" y="6" width="9" height="2" rx="1"/>
-            <rect x="0" y="11" width="14" height="2" rx="1"/>
-          </svg>
-        </button>
-        <button data-cmd="justifyCenter" aria-label="Align center">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-            <rect x="0" y="1" width="14" height="2" rx="1"/>
-            <rect x="2.5" y="6" width="9" height="2" rx="1"/>
-            <rect x="0" y="11" width="14" height="2" rx="1"/>
-          </svg>
-        </button>
-        <button data-cmd="justifyRight" aria-label="Align right">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-            <rect x="0" y="1" width="14" height="2" rx="1"/>
-            <rect x="5" y="6" width="9" height="2" rx="1"/>
-            <rect x="0" y="11" width="14" height="2" rx="1"/>
-          </svg>
-        </button>
-        <span class="tb-sep" role="separator"></span>
-        <button id="btn-source-toggle" aria-label="Toggle markdown source" style="margin-left:auto;font-weight:600">Markdown</button>
-      </div>
-      <div id="editor" contenteditable="true" spellcheck="true" data-placeholder="Content…"></div>
-      <textarea id="editor-source" class="hidden" placeholder="Content… (markdown)" spellcheck="false"></textarea>
-    </div>
+    <!-- The editor mounts here. Toolbar, markdown toggle, checklists and
+         styling all come from the shared component (editor.js), which is
+         generated from the dashboard's src/shared/editor.js. -->
+    <div id="editor-mount"></div>
   </div>
 
   <!-- Attachments — note only -->
@@ -316,6 +271,6 @@
 
 <script src="turndown.js"></script>
 <script src="marked.js"></script>
-<script src="popup.js"></script>
+<script type="module" src="popup.js"></script>
 </body>
 </html>
