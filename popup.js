@@ -146,11 +146,11 @@ async function getSettings() {
     chrome.storage.sync.get(
       {
         serverUrl: 'https://dashboard.erinskidds.com',
-        apiKey: '',
-        defaultFolder: 'Notes',
-        defaultList: 'Reminders',
+        apiKey: 'a2369d061fa3dabb8e4da02b12a9c5d591264c7e5f59bfd70ac4c2450bcf6042',
+        defaultFolder: 'Quick Notes',
+        defaultList: 'Inbox',
         defaultCalendar: 'Calendar',
-        aiEnabled: false,
+        aiEnabled: true,
       },
       resolve
     );

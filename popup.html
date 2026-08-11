@@ -233,7 +233,7 @@
     <div style="margin-bottom:8px">
       <label>Start</label>
       <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
-        <input id="startDate-date" type="date" />
+        <input id="startDate-date" type="date" required />
         <input id="startDate-time" type="time" />
       </div>
     </div>
@@ -308,9 +308,10 @@
     <input type="file" id="file-input" multiple accept="image/*,.pdf" style="display:none" />
     <div class="file-chips" id="file-chips"></div>
   </div>
-
-  <button class="btn btn-amber" id="submit-btn">Add to Queue</button>
+  
   <div class="status" id="status"></div>
+  <button class="btn btn-amber" id="submit-btn">Add to Queue</button>
+
 </div>
 
 <script src="turndown.js"></script>
