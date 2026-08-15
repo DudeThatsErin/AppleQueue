@@ -65,7 +65,7 @@ jobs:
         run: |
           # A syntax error here would ship a broken extension that fails silently
           # on install, so fail the release instead.
-          for f in popup.js settings.js background.js editor.js turndown.js; do
+          for f in popup.js settings.js background.js marked.js editor.js turndown.js; do
             node --check "$f"
           done
           python3 -c "import json; json.load(open('manifest.json'))"
@@ -77,7 +77,7 @@ jobs:
           VERSION: ${{ steps.manifest.outputs.version }}
         run: |
           zip -r "apple-queue-${VERSION}.zip" \
-            manifest.json popup.html popup.js editor.js turndown.js settings.html settings.js background.js icons \
+            manifest.json popup.html popup.js editor.js marked.js turndown.js settings.html settings.js background.js icons \
             -x '*.DS_Store'
           # A stable filename too, so the dashboard download link never changes.
           cp "apple-queue-${VERSION}.zip" apple-notes-extension.zip
