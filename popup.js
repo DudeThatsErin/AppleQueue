@@ -58,12 +58,16 @@ function clearDateTime(prefix) {
 // ── Draft persistence ────────────────────────────────────────────────────────
 
 const DRAFT_KEY = 'draft';
+const DRAFT_TTL_MS = 2 * 60 * 1000; // Remember the last-opened draft for 2 minutes.
 
 const DRAFT_FIELDS = [
   'title',
   'secondary',
   'priority',
+  'reminder-url',
   'location',
+  'event-url',
+  'invitees',
   'dueDate-date',
   'dueDate-time',
   'startDate-date',
@@ -75,8 +79,9 @@ const DRAFT_FIELDS = [
 function getDraftState() {
   const state = {
     type: currentType,
-    editorMode: editorApi ? editorApi.getMode() : 'wysiwyg',
+    editorMode: editorApi ? editorApi.getMode() : 'markdown',
     bodyMarkdown: editorApi ? editorApi.getValue() : '',
+    savedAt: Date.now(),
   };
 
   for (const id of DRAFT_FIELDS) {
@@ -124,6 +129,14 @@ async function restoreDraft(settings) {
     return false;
   }
 
+  // Old drafts should not keep stale page title/URL around indefinitely.
+  // Drafts from builds before this timestamp existed are treated as expired.
+  const savedAt = Number(draft.savedAt || 0);
+  if (!savedAt || Date.now() - savedAt > DRAFT_TTL_MS) {
+    chrome.storage.local.remove(DRAFT_KEY);
+    return false;
+  }
+
   await setType(
     draft.type || 'note',
     settings
@@ -146,9 +159,9 @@ async function restoreDraft(settings) {
 
   if (editorApi) {
     editorApi.setMode(
-      draft.editorMode === 'markdown'
-        ? 'markdown'
-        : 'wysiwyg'
+      draft.editorMode === 'wysiwyg'
+        ? 'wysiwyg'
+        : 'markdown'
     );
 
     editorApi.setValue(
@@ -158,6 +171,10 @@ async function restoreDraft(settings) {
         ''
       )
     );
+
+    if ((draft.type || 'note') === 'reminder') {
+      moveCapturedUrlOutOfBody('reminder');
+    }
   }
 
   return true;
@@ -273,63 +290,122 @@ function addFiles(files) {
 async function uploadFile(
   serverUrl,
   apiKey,
-  file
+  file,
+  onProgress = null
 ) {
-  const fd =
-    new FormData();
+  const fd = new FormData();
+  fd.append('file', file);
 
-  fd.append(
-    'file',
-    file
-  );
+  // XMLHttpRequest gives the extension a real network-level timeout and
+  // upload progress. A stalled request can no longer sit in Pending forever.
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const baseUrl = String(serverUrl || '').replace(/\/+$/, '');
 
-  const controller =
-    new AbortController();
-
-  const timeout =
-    setTimeout(
-      () => controller.abort(),
-      60_000
+    xhr.open(
+      'POST',
+      `${baseUrl}/api/apple-notes/upload`,
+      true
     );
 
+    xhr.setRequestHeader(
+      'x-api-key',
+      apiKey
+    );
+
+    // Hard cap for the complete upload request, including waiting for the
+    // server response after the file bytes have finished sending.
+    xhr.timeout = 60_000;
+
+    xhr.upload.onprogress = (event) => {
+      if (
+        typeof onProgress === 'function' &&
+        event.lengthComputable
+      ) {
+        const percent = Math.min(
+          100,
+          Math.round((event.loaded / event.total) * 100)
+        );
+
+        onProgress(percent);
+      }
+    };
+
+    xhr.onload = () => {
+      let data = {};
+
+      try {
+        data = xhr.responseText
+          ? JSON.parse(xhr.responseText)
+          : {};
+      } catch {
+        data = {};
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+        return;
+      }
+
+      reject(
+        new Error(
+          data.error ||
+          `Upload failed: ${file.name} (HTTP ${xhr.status})`
+        )
+      );
+    };
+
+    xhr.ontimeout = () => {
+      reject(
+        new Error(
+          `Upload timed out after 60 seconds: ${file.name}`
+        )
+      );
+    };
+
+    xhr.onerror = () => {
+      reject(
+        new Error(
+          `Network error while uploading ${file.name}`
+        )
+      );
+    };
+
+    xhr.onabort = () => {
+      reject(
+        new Error(
+          `Upload cancelled: ${file.name}`
+        )
+      );
+    };
+
+    xhr.send(fd);
+  });
+}
+
+async function fetchWithTimeout(
+  url,
+  options = {},
+  timeoutMs = 30_000
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    timeoutMs
+  );
+
   try {
-    const res =
-      await fetch(
-        `${serverUrl}/api/apple-notes/upload`,
-        {
-          method: 'POST',
-
-          headers: {
-            'x-api-key': apiKey,
-          },
-
-          body: fd,
-
-          signal:
-            controller.signal,
-        }
-      );
-
-    const data =
-      await res
-        .json()
-        .catch(() => ({}));
-
-    if (!res.ok) {
-      throw new Error(
-        data.error ||
-        `Upload failed: ${file.name} (HTTP ${res.status})`
-      );
-    }
-
-    return data;
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
   } catch (err) {
     if (
       err instanceof DOMException &&
       err.name === 'AbortError'
     ) {
       throw new Error(
-        `Upload timed out after 60 seconds: ${file.name}`
+        `Request timed out after ${Math.round(timeoutMs / 1000)} seconds.`
       );
     }
 
@@ -430,6 +506,10 @@ async function applyCapture(
     editorApi.setValue(
       capture.body || ''
     );
+
+    if (capture.type === 'reminder') {
+      moveCapturedUrlOutOfBody('reminder');
+    }
   }
 
   setDateTime(
@@ -461,6 +541,12 @@ async function applyCapture(
     'location'
   ).value =
     capture.location || '';
+
+  document.getElementById('event-url').value =
+    capture.url || capture.eventUrl || '';
+
+  document.getElementById('invitees').value =
+    Array.isArray(capture.invitees) ? capture.invitees.join(', ') : (capture.invitees || '');
 
   scheduleDraftSave();
 }
@@ -624,6 +710,29 @@ function setupAi(settings) {
 
 // ── Type switching ──────────────────────────────────────────────────────────
 
+// Move a captured page URL out of the Notes body and into the type-specific
+// URL field. Active-tab prefill is stored as a Markdown link.
+function moveCapturedUrlOutOfBody(type = currentType) {
+  if (!editorApi) return;
+
+  const targetId = type === 'reminder' ? 'reminder-url' : type === 'event' ? 'event-url' : '';
+  if (!targetId) return;
+
+  const urlInput = document.getElementById(targetId);
+  if (!urlInput || urlInput.value.trim()) return;
+
+  const body = editorApi.getValue();
+  if (!body) return;
+
+  const markdownMatch = body.match(/(?:^|\n\s*\n)\[([^\]\s]+)\]\(\1\)\s*$/);
+  const plainMatch = body.match(/(?:^|\n\s*\n)(https?:\/\/\S+)\s*$/);
+  const match = markdownMatch || plainMatch;
+  if (!match) return;
+
+  urlInput.value = match[1];
+  editorApi.setValue(body.slice(0, match.index).trimEnd());
+}
+
 function setType(
   type,
   settings
@@ -643,7 +752,7 @@ function setType(
 
   document.getElementById(
     'header-title'
-  ).textContent =
+  ).innerHTML =
     HEADER_TITLE[type];
 
   document.getElementById(
@@ -684,7 +793,132 @@ function setType(
     type !== 'note'
   );
 
+  if (type === 'reminder' || type === 'event') {
+    moveCapturedUrlOutOfBody(type);
+  }
+
   setStatus('');
+}
+
+// ── Google Places address autocomplete ─────────────────────────────────────
+
+function setupPlaceAutocomplete(settings) {
+  const input = document.getElementById('location');
+  const box = document.getElementById('place-suggestions');
+  if (!input || !box) return;
+
+  let timer = null;
+  let requestSeq = 0;
+
+  const hide = () => {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+  };
+
+  const message = (text, isError = false) => {
+    box.innerHTML = '';
+    const row = document.createElement('div');
+    row.className = 'place-message' + (isError ? ' err' : '');
+    row.textContent = text;
+    box.appendChild(row);
+    box.classList.remove('hidden');
+  };
+
+  const normaliseSuggestion = (item) => {
+    if (typeof item === 'string') return item;
+    return (
+      item?.text ||
+      item?.description ||
+      item?.formattedAddress ||
+      item?.placePrediction?.text?.text ||
+      item?.placePrediction?.structuredFormat?.mainText?.text ||
+      ''
+    );
+  };
+
+  const render = (items) => {
+    const texts = items.map(normaliseSuggestion).filter(Boolean);
+    box.innerHTML = '';
+    if (!texts.length) {
+      message('No matching addresses found.');
+      return;
+    }
+
+    texts.slice(0, 5).forEach((text) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'place-suggestion';
+      btn.textContent = text;
+      btn.addEventListener('mousedown', (e) => e.preventDefault());
+      btn.addEventListener('click', () => {
+        input.value = text;
+        hide();
+        scheduleDraftSave();
+      });
+      box.appendChild(btn);
+    });
+
+    const credit = document.createElement('div');
+    credit.className = 'place-google';
+    credit.textContent = 'Powered by Google';
+    box.appendChild(credit);
+    box.classList.remove('hidden');
+  };
+
+  input.addEventListener('input', () => {
+    scheduleDraftSave();
+    clearTimeout(timer);
+
+    const q = input.value.trim();
+    if (q.length < 3 || /^https?:\/\//i.test(q)) {
+      hide();
+      return;
+    }
+
+    const seq = ++requestSeq;
+    message('Searching addresses…');
+
+    timer = setTimeout(async () => {
+      try {
+        const base = String(settings.serverUrl || '').replace(/\/+$/, '');
+        const res = await fetchWithTimeout(`${base}/api/places/autocomplete`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': settings.apiKey,
+          },
+          body: JSON.stringify({ input: q }),
+        }, 8_000);
+
+        const data = await res.json().catch(() => ({}));
+        if (seq !== requestSeq) return;
+
+        if (!res.ok) {
+          message(data.error || `Address search failed (HTTP ${res.status}).`, true);
+          return;
+        }
+
+        const suggestions = Array.isArray(data.suggestions)
+          ? data.suggestions
+          : Array.isArray(data.predictions)
+            ? data.predictions
+            : [];
+
+        render(suggestions);
+      } catch (err) {
+        if (seq !== requestSeq) return;
+        message(err?.message || 'Address search failed.', true);
+      }
+    }, 250);
+  });
+
+  input.addEventListener('focus', () => {
+    if (input.value.trim().length >= 3 && box.innerHTML) {
+      box.classList.remove('hidden');
+    }
+  });
+
+  input.addEventListener('blur', () => setTimeout(hide, 180));
 }
 
 // ── Expanded view ───────────────────────────────────────────────────────────
@@ -809,6 +1043,9 @@ document.addEventListener(
           placeholder:
             'Content…',
 
+          mode:
+            'markdown',
+
           minHeight:
             150,
 
@@ -818,6 +1055,7 @@ document.addEventListener(
       );
 
     setupAi(settings);
+    setupPlaceAutocomplete(settings);
 
     // Type tabs.
     document
@@ -910,7 +1148,18 @@ document.addEventListener(
         editorApi.setValue(
           prefill.join('\n\n')
         );
+
+        // If Reminder is already active, immediately move the captured page
+        // URL into its dedicated field instead of leaving it in Notes.
+        if (currentType === 'reminder' || currentType === 'event') {
+          moveCapturedUrlOutOfBody(currentType);
+        }
       }
+
+      // Remember this freshly captured tab for a short window. If Apple Queue
+      // is reopened within 2 minutes, keep this draft; after that the savedAt
+      // check above expires it and the current tab is captured instead.
+      scheduleDraftSave();
     }
 
     // Draft autosave.
@@ -930,6 +1179,21 @@ document.addEventListener(
 
     document
       .getElementById('location')
+      .addEventListener(
+        'input',
+        scheduleDraftSave
+      );
+
+    document
+      .getElementById('event-url')
+      .addEventListener('input', scheduleDraftSave);
+
+    document
+      .getElementById('invitees')
+      .addEventListener('input', scheduleDraftSave);
+
+    document
+      .getElementById('reminder-url')
       .addEventListener(
         'input',
         scheduleDraftSave
@@ -1249,7 +1513,12 @@ document.addEventListener(
                     await uploadFile(
                       settings.serverUrl,
                       apiKey,
-                      file
+                      file,
+                      (percent) => {
+                        setStatus(
+                          `Uploading ${file.name}… ${percent}%`
+                        );
+                      }
                     );
 
                   attachments.push({
@@ -1291,6 +1560,14 @@ document.addEventListener(
                     'dueDate'
                   ),
 
+                url:
+                  document
+                    .getElementById(
+                      'reminder-url'
+                    )
+                    .value
+                    .trim(),
+
                 priority:
                   document.getElementById(
                     'priority'
@@ -1328,6 +1605,18 @@ document.addEventListener(
                     )
                     .value
                     .trim(),
+
+                url:
+                  document
+                    .getElementById('event-url')
+                    .value
+                    .trim(),
+
+                invitees:
+                  document
+                    .getElementById('invitees')
+                    .value
+                    .trim(),
               };
             }
 
@@ -1336,8 +1625,8 @@ document.addEventListener(
             );
 
             const res =
-              await fetch(
-                `${settings.serverUrl}${ENDPOINT[currentType]}`,
+              await fetchWithTimeout(
+                `${String(settings.serverUrl || '').replace(/\/+$/, '')}${ENDPOINT[currentType]}`,
                 {
                   method:
                     'POST',
@@ -1354,7 +1643,8 @@ document.addEventListener(
                     JSON.stringify(
                       payload
                     ),
-                }
+                },
+                30_000
               );
 
             if (!res.ok) {
@@ -1375,14 +1665,19 @@ document.addEventListener(
               '✓ Added to queue!'
             );
 
-            clearDraft();
-
             document.getElementById(
               'title'
             ).value = '';
 
             document.getElementById(
               'location'
+            ).value = '';
+
+            document.getElementById('event-url').value = '';
+            document.getElementById('invitees').value = '';
+
+            document.getElementById(
+              'reminder-url'
             ).value = '';
 
             document.getElementById(
@@ -1409,7 +1704,7 @@ document.addEventListener(
 
             if (editorApi) {
               editorApi.setMode(
-                'wysiwyg'
+                'markdown'
               );
 
               editorApi.setValue(
@@ -1420,6 +1715,11 @@ document.addEventListener(
             pendingFiles = [];
 
             renderChips();
+
+            // Clearing the editor can trigger its onChange handler and schedule a
+            // fresh draft save. Clear the draft *after* all successful-submit
+            // resets so the next open always starts from the current browser tab.
+            clearDraft();
 
             if (
               !isExpandedSurface

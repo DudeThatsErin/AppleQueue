@@ -149,7 +149,7 @@ export function createMarkdownTools({ marked, TurndownService }) {
  */
 
 export const EDITOR_CSS = `
-.mdx { border: 1px solid #334155; border-radius: 0.375rem; overflow: hidden; background: #0f172a; }
+.mdx { font-family: 'Google Sans', 'Google Sans Text', 'Google Sans Flex', Arial, sans-serif; border: 1px solid #334155; border-radius: 0.375rem; overflow: hidden; background: #0f172a; }
 
 .mdx-toolbar {
   display: flex; flex-wrap: wrap; gap: 2px; align-items: center;
@@ -158,9 +158,9 @@ export const EDITOR_CSS = `
 .mdx-toolbar button {
   min-width: 26px; height: 26px; padding: 0 6px;
   background: none; border: none; border-radius: 4px;
-  color: #94a3b8; font-size: 12px; line-height: 1; cursor: pointer;
+  color: #fff; font-size: 12px; line-height: 1; cursor: pointer;
 }
-.mdx-toolbar button:hover:not(:disabled) { background: #253347; color: #e2e8f0; }
+.mdx-toolbar button:hover:not(:disabled) { background: #253347; color: #fff; }
 .mdx-toolbar button.active { background: #0891b2; color: #fff; }
 .mdx-toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 .mdx-toolbar .mdx-sep { width: 1px; height: 16px; margin: 0 3px; background: #334155; }
@@ -173,7 +173,11 @@ export const EDITOR_CSS = `
 }
 .mdx-source {
   border: 0; resize: vertical; display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: 'Google Sans', 'Google Sans Text', 'Google Sans Flex', Arial, sans-serif;
+  /* Markdown source wraps by default. The toolbar can toggle no-wrap. */
+  white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden;
+}
+.mdx-source.mdx-nowrap {
   white-space: pre; overflow-wrap: normal; overflow-x: auto;
 }
 .mdx-surface[data-empty="true"]::before {
@@ -208,13 +212,13 @@ export const EDITOR_CSS = `
 .mdx-surface pre, .mdx-preview pre {
   margin: 0.2rem 0; padding: 0.5rem; border-radius: 0.25rem;
   background: #1e293b; overflow-x: auto; white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem;
+  font-family: 'Google Sans', 'Google Sans Text', 'Google Sans Flex', Arial, sans-serif; font-size: 0.8rem;
 }
 /* Inline code and the <code> marked nests inside <pre>: the nested one must
  * not double up the block's background and padding. */
 .mdx-surface code, .mdx-preview code {
   background: #1e293b; border-radius: 0.2rem; padding: 0.05rem 0.3rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em;
+  font-family: 'Google Sans', 'Google Sans Text', 'Google Sans Flex', Arial, sans-serif; font-size: 0.85em;
 }
 .mdx-surface pre code, .mdx-preview pre code {
   background: none; padding: 0; font-size: inherit;
@@ -318,7 +322,7 @@ export function createEditor(container, options = {}) {
     value = '',
     placeholder = 'Content…',
     minHeight = 140,
-    mode = 'wysiwyg',
+    mode = 'markdown',
     onChange = () => {},
   } = options;
 
@@ -434,6 +438,27 @@ export function createEditor(container, options = {}) {
     setMode(currentMode === 'markdown' ? 'wysiwyg' : 'markdown');
   });
   toolbar.appendChild(modeBtn);
+
+  // Markdown source wraps by default. This toggle only changes the source
+  // textarea; WYSIWYG already wraps naturally. Wrap always starts enabled on
+  // a fresh editor instance, even if the user turned it off last time.
+  let sourceWrap = true;
+  const wrapBtn = doc.createElement('button');
+  wrapBtn.type = 'button';
+  wrapBtn.className = 'mdx-wrap active';
+  wrapBtn.title = 'Toggle word wrap';
+  wrapBtn.setAttribute('aria-label', 'Toggle word wrap');
+  wrapBtn.textContent = 'Wrap';
+  wrapBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    sourceWrap = !sourceWrap;
+    source.classList.toggle('mdx-nowrap', !sourceWrap);
+    wrapBtn.classList.toggle('active', sourceWrap);
+    wrapBtn.setAttribute('aria-pressed', sourceWrap ? 'true' : 'false');
+    if (currentMode === 'markdown') source.focus();
+  });
+  wrapBtn.setAttribute('aria-pressed', 'true');
+  toolbar.appendChild(wrapBtn);
 
   /* — checklists — */
 
@@ -744,6 +769,7 @@ export function createEditor(container, options = {}) {
     modeBtn.textContent = isSource ? 'Editor' : 'Markdown';
     // Formatting buttons act on the WYSIWYG surface, which isn't on screen.
     buttons.forEach((b) => { b.disabled = isSource; });
+    wrapBtn.disabled = !isSource;
   }
 
   function setMode(next) {
