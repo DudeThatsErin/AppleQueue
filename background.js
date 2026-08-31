@@ -36,7 +36,7 @@ async function getSettings() {
     chrome.storage.sync.get(
       {
         serverUrl: 'https://dashboard.erinskidds.com',
-        apiKey: 'a2369d061fa3dabb8e4da02b12a9c5d591264c7e5f59bfd70ac4c2450bcf6042',
+        apiKey: '',
         defaultFolder: 'Quick Notes',
         defaultList: 'Inbox',
         defaultCalendar: 'Calendar',
@@ -96,6 +96,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     });
     const imageUrl = result?.result || info.srcUrl;
     const { serverUrl, apiKey } = await getSettings();
+    if (!apiKey) {
+      chrome.notifications?.create({
+        type: 'basic',
+        iconUrl: 'icons/icon48.png',
+        title: 'Apple Queue',
+        message: 'You need to add your API key. Open extension settings to add it.',
+      });
+      chrome.runtime.openOptionsPage();
+      return;
+    }
     try {
       // Fetch the image as blob then upload
       const imgRes = await fetch(imageUrl);

@@ -128,34 +128,54 @@
   .status { font-size: 12px; text-align: center; min-height: 18px; }
   .status.ok { color: #34d399; }
   .status.err { color: #f87171; }
-  /* Keep native controls readable against the always-dark inputs.
-     Chrome's native date/time glyphs ignore color in some builds, so hide the
-     native artwork while leaving its clickable hit-area in place, then draw a
-     white SVG icon ourselves. */
+  /* Keep native controls readable against the always-dark inputs. The visible
+     white icon is a real button that calls showPicker(), so it stays clickable
+     in Chrome extension popups, side panels, and full-tab views. */
   input[type="date"], input[type="time"], select { color-scheme: dark; }
-  input[type="date"], input[type="time"] {
-    padding-right: 30px;
-    background-repeat: no-repeat;
-    background-position: right 9px center;
-    background-size: 14px 14px;
-  }
-  input[type="date"] {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='18' rx='2' ry='2'/%3E%3Cline x1='16' y1='2' x2='16' y2='6'/%3E%3Cline x1='8' y1='2' x2='8' y2='6'/%3E%3Cline x1='3' y1='10' x2='21' y2='10'/%3E%3C/svg%3E");
-  }
-  input[type="time"] {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpolyline points='12 7 12 12 16 14'/%3E%3C/svg%3E");
-  }
-  input[type="date"]::-webkit-calendar-picker-indicator,
-  input[type="time"]::-webkit-calendar-picker-indicator {
-    opacity: 0 !important;
-    width: 24px;
-    height: 24px;
-    cursor: pointer;
-  }
 
   .datetime-stack { display: flex; flex-direction: column; gap: 6px; }
-  .datetime-stack input[type="date"],
-  .datetime-stack input[type="time"] { width: 100%; }
+  .picker-field { position: relative; width: 100%; }
+  .picker-field input[type="date"],
+  .picker-field input[type="time"] {
+    width: 100%;
+    padding-right: 42px;
+    background-image: none;
+    cursor: text;
+  }
+  .picker-field input[type="date"]::-webkit-calendar-picker-indicator,
+  .picker-field input[type="time"]::-webkit-calendar-picker-indicator {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+  .picker-trigger {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    bottom: 1px;
+    width: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 0 4px 4px 0;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .picker-trigger:hover { background: rgba(255, 255, 255, 0.06); }
+  .picker-trigger:focus-visible {
+    outline: 2px solid #f59e0b;
+    outline-offset: -3px;
+  }
+  .picker-trigger svg {
+    width: 16px;
+    height: 16px;
+    pointer-events: none;
+  }
+  .picker-field:focus-within .picker-trigger { color: #f59e0b; }
 
   select {
     appearance: none;
@@ -210,10 +230,51 @@
   #ai-status.busy { color: #818cf8; }
 
   #no-key {
-    background: #1e293b; border: 1px solid #f59e0b33; border-radius: 6px;
-    padding: 10px 12px; font-size: 12px; color: #94a3b8; text-align: center; display: none;
+    display: none;
+    padding: 28px 18px;
   }
-  #no-key a { color: #f59e0b; }
+  .setup-gate-card {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 24px 20px;
+    background: linear-gradient(to bottom right, #1e293b, #111b30);
+    border: 1px solid #334155;
+    border-radius: 10px;
+    text-align: center;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+  }
+  .setup-gate-icon {
+    font-size: 34px;
+    line-height: 1;
+    margin-bottom: 12px;
+  }
+  .setup-gate-card h2 {
+    margin: 0 0 10px;
+    color: #f8fafc;
+    font-size: 18px;
+  }
+  .setup-gate-card p {
+    margin: 0 auto 18px;
+    max-width: 430px;
+    color: #94a3b8;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .setup-gate-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    padding: 9px 16px;
+    border-radius: 6px;
+    background: #f59e0b;
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .setup-gate-button:hover { background: #fbbf24; color: #0f172a; }
+  body.setup-required #no-key { display: block; }
 </style>
 </head>
 <body>
@@ -225,8 +286,13 @@
   </div>
 </header>
 
-<div id="no-key">
-  API key not set. <a href="#" id="settings-link-2">Open Settings →</a>
+<div id="no-key" role="status" aria-live="polite">
+  <div class="setup-gate-card">
+    <div class="setup-gate-icon" aria-hidden="true">🔑</div>
+    <h2>API key required</h2>
+    <p>You need to add your API key. Please open Settings to add it before using Apple Queue.</p>
+    <a href="#" id="settings-link-2" class="setup-gate-button">⚙ Open Settings</a>
+  </div>
 </div>
 
 <div class="body" id="main-form">
@@ -261,10 +327,28 @@
   <!-- Reminder-only fields -->
   <div id="reminder-fields" class="hidden" style="display:flex;flex-direction:column;gap:10px">
     <div>
-      <label>Due Date <span style="color:#475569">(optional)</span></label>
+      <label>Due Date <span style="color:#475569">(defaults to today; time optional)</span></label>
       <div class="datetime-stack">
-        <input id="dueDate-date" type="date" />
-        <input id="dueDate-time" type="time" />
+        <div class="picker-field">
+          <input id="dueDate-date" type="date" required />
+          <button type="button" class="picker-trigger" data-picker-target="dueDate-date" aria-label="Open due date picker" title="Open due date picker">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                      </svg>
+                    </button>
+        </div>
+        <div class="picker-field">
+          <input id="dueDate-time" type="time" />
+          <button type="button" class="picker-trigger" data-picker-target="dueDate-time" aria-label="Open due time picker" title="Open due time picker">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9"></circle>
+                        <polyline points="12 7 12 12 16 14"></polyline>
+                      </svg>
+                    </button>
+        </div>
       </div>
     </div>
     <div>
@@ -291,15 +375,51 @@
     <div style="margin-bottom:8px">
       <label>Start</label>
       <div class="datetime-stack">
-        <input id="startDate-date" type="date" required />
-        <input id="startDate-time" type="time" />
+        <div class="picker-field">
+          <input id="startDate-date" type="date" required />
+          <button type="button" class="picker-trigger" data-picker-target="startDate-date" aria-label="Open start date picker" title="Open start date picker">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                      </svg>
+                    </button>
+        </div>
+        <div class="picker-field">
+          <input id="startDate-time" type="time" />
+          <button type="button" class="picker-trigger" data-picker-target="startDate-time" aria-label="Open start time picker" title="Open start time picker">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9"></circle>
+                        <polyline points="12 7 12 12 16 14"></polyline>
+                      </svg>
+                    </button>
+        </div>
       </div>
     </div>
     <div style="margin-bottom:8px">
       <label id="endDate-label">End</label>
       <div class="datetime-stack">
-        <input id="endDate-date" type="date" required />
-        <input id="endDate-time" type="time" />
+        <div class="picker-field">
+          <input id="endDate-date" type="date" required />
+          <button type="button" class="picker-trigger" data-picker-target="endDate-date" aria-label="Open end date picker" title="Open end date picker">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                      </svg>
+                    </button>
+        </div>
+        <div class="picker-field">
+          <input id="endDate-time" type="time" />
+          <button type="button" class="picker-trigger" data-picker-target="endDate-time" aria-label="Open end time picker" title="Open end time picker">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9"></circle>
+                        <polyline points="12 7 12 12 16 14"></polyline>
+                      </svg>
+                    </button>
+        </div>
       </div>
     </div>
     <div style="margin-bottom:8px">
@@ -328,12 +448,13 @@
     <div id="editor-mount"></div>
   </div>
 
-  <!-- Attachments — note only -->
+  <!-- Attachments — Notes accept any file; Reminders accept images only. -->
   <div id="attachments-section">
-    <label>Attachments <span style="color:#475569">(images, PDF)</span></label>
-    <div class="drop-zone" id="drop-zone">Drop files or click to browse</div>
-    <input type="file" id="file-input" multiple accept="image/*,.pdf" style="display:none" />
+    <label id="attachments-label">Attachments <span style="color:#475569">(any file)</span></label>
+    <div class="drop-zone" id="drop-zone">Drop, paste, or click to attach any file</div>
+    <input type="file" id="file-input" multiple style="display:none" />
     <div class="file-chips" id="file-chips"></div>
+    <div id="clipboard-hint" style="margin-top:4px;font-size:10px;color:#64748b">You can paste an image/file from your clipboard anywhere in Apple Queue.</div>
   </div>
   
   <div class="status" id="status"></div>

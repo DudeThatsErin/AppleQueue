@@ -13,12 +13,12 @@
   h1 { font-size: 1.2rem; color: #f59e0b; margin-bottom: 1.5rem; }
   .form { max-width: 480px; display: flex; flex-direction: column; gap: 1.25rem; }
   label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 5px; }
-  input {
+  input, select {
     width: 100%; padding: 8px 10px;
     background: #1e293b; border: 1px solid #334155;
     border-radius: 6px; color: #e2e8f0; font-size: 14px;
   }
-  input:focus { outline: none; border-color: #f59e0b; }
+  input:focus, select:focus { outline: none; border-color: #f59e0b; }
   .hint { font-size: 11px; color: #475569; margin-top: 4px; }
   .btn {
     padding: 8px 20px; border: none; border-radius: 6px;
@@ -26,6 +26,7 @@
     background: #f59e0b; color: #0f172a; align-self: flex-start;
   }
   .status { font-size: 13px; color: #34d399; min-height: 20px; }
+  .status.err { color: #f87171; }
   .toggle-row { display: flex; align-items: flex-start; gap: 10px; }
   .toggle-row input { width: 16px; height: 16px; flex: none; margin-top: 2px; }
   .toggle-row label { margin: 0; font-size: 14px; color: #e2e8f0; cursor: pointer; }
@@ -39,9 +40,22 @@
     cursor: pointer; align-self: flex-start;
   }
   .btn-secondary:disabled { opacity: 0.55; cursor: default; }
-  #ai-test-status { font-size: 12px; min-height: 18px; color: #94a3b8; }
-  #ai-test-status.ok { color: #34d399; }
-  #ai-test-status.err { color: #f87171; }
+  select {
+    width: 100%; padding: 8px 10px;
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 6px; color: #e2e8f0; font-size: 14px;
+  }
+  .subsection {
+    border: 1px solid #1e293b; border-radius: 8px; padding: 12px;
+    display: flex; flex-direction: column; gap: 10px; background: #111c30;
+  }
+  .hidden { display: none !important; }
+  .status-line { font-size: 12px; min-height: 18px; color: #94a3b8; }
+  .status-line.ok { color: #34d399; }
+  .status-line.err { color: #f87171; }
+  .status-line.busy { color: #818cf8; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 560px) { .field-row { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -56,6 +70,12 @@
     <label>API Key</label>
     <input id="apiKey" type="password" placeholder="Paste your API key here" />
     <p class="hint">Find this in the Apple Notes / Reminders / Calendar pages on your dashboard under "Set up the iOS Shortcut". The same key works for all three.</p>
+  </div>
+  <div class="subsection">
+    <strong>Extension connection</strong>
+    <p class="hint" style="margin:0">Checks the server, API key, and the Notes, Reminders, and Calendar queue APIs. This does not test your AI provider.</p>
+    <button class="btn-secondary" id="extension-test-btn">Test extension connection</button>
+    <div class="status-line" id="extension-test-status"></div>
   </div>
   <div>
     <label>Default Folder (Notes)</label>
@@ -82,12 +102,42 @@
       <label for="aiEnabled">Enable natural-language parsing</label>
     </div>
     <p class="hint" style="margin:0">
-      Adds a box to the popup where you can type things like “call the vet friday at 3pm”, and
-      the AI fills in the type, title, list and date for you to review. Nothing is ever saved
-      without you pressing Add. Runs on your own server, so your text is not sent to anyone else.
+      Adds the natural-language box to Apple Queue. AI configuration below is only used when this is enabled.
     </p>
-    <button class="btn-secondary" id="ai-test-btn">Test connection</button>
-    <div id="ai-test-status"></div>
+
+    <div id="ai-config" class="subsection hidden">
+      <div>
+        <label>AI Provider</label>
+        <select id="aiProvider">
+          <option value="openai">ChatGPT / OpenAI</option>
+          <option value="anthropic">Claude / Anthropic</option>
+          <option value="gemini">Gemini / Google</option>
+          <option value="ollama">Ollama</option>
+        </select>
+      </div>
+
+      <div class="field-row">
+        <div>
+          <label>Model</label>
+          <input id="aiModel" type="text" placeholder="Model name" />
+          <p class="hint" id="ai-model-hint"></p>
+        </div>
+        <div id="ai-key-field">
+          <label id="ai-key-label">Provider API Key</label>
+          <input id="aiApiKey" type="password" autocomplete="off" placeholder="Provider API key" />
+          <p class="hint" id="ai-key-hint">Saved only in this browser profile, not Chrome Sync.</p>
+        </div>
+      </div>
+
+      <div id="ai-base-url-field" class="hidden">
+        <label>Ollama Base URL</label>
+        <input id="aiBaseUrl" type="url" placeholder="http://localhost:11434" />
+        <p class="hint">For Ollama on the same computer, use <code>http://localhost:11434</code>. For Ollama Cloud, use <code>https://ollama.com</code> and provide an API key above.</p>
+      </div>
+
+      <button class="btn-secondary" id="ai-test-btn">Test AI connection</button>
+      <div class="status-line" id="ai-test-status"></div>
+    </div>
   </div>
 
   <button class="btn" id="save-btn">Save Settings</button>
