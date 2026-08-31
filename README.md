@@ -1,7 +1,7 @@
 # Apple Queue
 
 A Chrome and Firefox extension that queues **Notes**, **Reminders**, and **Calendar events**
-to Apple, via [dashboard.erinskidds.com](https://dashboard.erinskidds.com) and an iOS Shortcut.
+to Apple, via [Apple Queue's Website](https://applequeue.erinskidds.com/) and an iOS Shortcut.
 
 Apple has no public write API for Notes, Reminders, or Calendar. This extension posts to a
 queue on my server; a Shortcut on my phone drains that queue and creates the real items.
